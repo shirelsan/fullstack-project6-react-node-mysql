@@ -4,15 +4,22 @@ import axios from 'axios';
 function Todos() {
   const [todos, setTodos] = useState([]);
   const [newTitle, setNewTitle] = useState('');
+  const [filter, setFilter] = useState('all'); // 'all' | 'completed' | 'active'
+  const [search, setSearch] = useState('');
+  const [sortOrder, setSortOrder] = useState('asc');
   const user = JSON.parse(localStorage.getItem('user'));
 
   useEffect(() => {
     fetchTodos();
-  }, []);
+  }, [filter, search, sortOrder]);
 
   const fetchTodos = async () => {
     try {
-      const res = await axios.get(`http://localhost:5000/api/todos?user_id=${user.id}`);
+      let url = `http://localhost:5000/api/todos?user_id=${user.id}&_sort=id&_order=${sortOrder}`;
+      if (filter === 'completed') url += '&completed=true';
+      if (filter === 'active') url += '&completed=false';
+      if (search.trim()) url += `&title_like=${encodeURIComponent(search)}`;
+      const res = await axios.get(url);
       setTodos(res.data);
     } catch (err) {
       console.error(err);
@@ -58,7 +65,32 @@ function Todos() {
   return (
     <div>
       <h1 className="page-title">My Todos</h1>
-      
+
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search todos..."
+          style={{ flex: 1, minWidth: '180px', padding: '0.6rem', borderRadius: '0.5rem', border: '1px solid var(--border)' }}
+        />
+        <select
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          style={{ padding: '0.6rem', borderRadius: '0.5rem', border: '1px solid var(--border)' }}
+        >
+          <option value="all">All</option>
+          <option value="active">Active</option>
+          <option value="completed">Completed</option>
+        </select>
+        <button
+          onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+          className="btn btn-sm"
+        >
+          ID {sortOrder === 'asc' ? '\u2191' : '\u2193'}
+        </button>
+      </div>
+
       <form className="add-form" onSubmit={handleAddTodo}>
         <input 
           type="text" 

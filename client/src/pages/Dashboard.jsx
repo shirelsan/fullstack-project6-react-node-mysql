@@ -29,22 +29,36 @@ function Dashboard() {
         <div className="nav-links">
           <Link 
             to={`/users/${username}/posts`} 
-            className={`nav-link ${location.pathname.includes('/posts') ? 'active' : ''}`}
+            className={`nav-link ${location.pathname === `/users/${username}/posts` ? 'active' : ''}`}
           >
             Posts
           </Link>
           <Link 
             to={`/users/${username}/todos`} 
-            className={`nav-link ${location.pathname.includes('/todos') ? 'active' : ''}`}
+            className={`nav-link ${location.pathname === `/users/${username}/todos` ? 'active' : ''}`}
           >
             Todos
           </Link>
           <Link 
+            to={`/users/${username}/albums`} 
+            className={`nav-link ${location.pathname === `/users/${username}/albums` ? 'active' : ''}`}
+          >
+            Albums
+          </Link>
+          <Link 
             to={`/users/${username}/info`} 
-            className={`nav-link ${location.pathname.includes('/info') ? 'active' : ''}`}
+            className={`nav-link ${location.pathname === `/users/${username}/info` ? 'active' : ''}`}
           >
             Info
           </Link>
+          {user.role === 'admin' && (
+            <Link 
+              to={`/users/${username}/admin`} 
+              className={`nav-link ${location.pathname === `/users/${username}/admin` ? 'active' : ''}`}
+            >
+              Admin
+            </Link>
+          )}
           <button onClick={handleLogout} className="btn btn-sm btn-danger" style={{ marginLeft: '1rem' }}>
             Logout
           </button>

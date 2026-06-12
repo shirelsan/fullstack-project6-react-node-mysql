@@ -32,7 +32,6 @@ function Register() {
     <div className="auth-container" style={{ padding: '2rem 0' }}>
       <div className="auth-card" style={{ maxWidth: '500px' }}>
         <h2>Create Account</h2>
-        {error && <div className="error-message">{error}</div>}
         <form onSubmit={handleRegister}>
           <div className="form-group">
             <label>Full Name *</label>
@@ -58,6 +57,7 @@ function Register() {
             <label>Password *</label>
             <input type="password" name="password" value={formData.password} onChange={handleChange} required />
           </div>
+          {error && <div className="error-message" style={{ marginBottom: '0.75rem' }}>{error}</div>}
           <button type="submit" className="btn">Sign Up</button>
         </form>
         <div style={{ marginTop: '1.5rem', textAlign: 'center', fontSize: '0.9rem' }}>

@@ -4,7 +4,9 @@ import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import Todos from './pages/Todos';
 import Posts from './pages/Posts';
+import Albums from './pages/Albums';
 import Info from './pages/Info';
+import Admin from './pages/Admin';
 
 function App() {
   return (
@@ -16,7 +18,9 @@ function App() {
         <Route path="/users/:username" element={<Dashboard />}>
           <Route path="todos" element={<Todos />} />
           <Route path="posts" element={<Posts />} />
+          <Route path="albums" element={<Albums />} />
           <Route path="info" element={<Info />} />
+          <Route path="admin" element={<Admin />} />
         </Route>
       </Routes>
     </Router>

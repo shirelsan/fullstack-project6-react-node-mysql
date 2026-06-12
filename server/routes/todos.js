@@ -2,17 +2,37 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db');
 
-// Get todos (supports optional user_id filter via query params)
+// Get todos (filters: ?user_id=, ?completed=, ?title_like=, sort: ?_sort=&_order=, pagination: ?_limit=&_page=)
 router.get('/', async (req, res) => {
-  const { user_id } = req.query;
+  const { user_id, completed, title_like, _sort, _order, _limit, _page } = req.query;
   try {
     let query = 'SELECT * FROM todos';
-    let params = [];
+    const conditions = [];
+    const params = [];
     if (user_id) {
-      query += ' WHERE user_id = ?';
+      conditions.push('user_id = ?');
       params.push(user_id);
     }
-    query += ' ORDER BY id ASC';
+    if (completed !== undefined) {
+      conditions.push('completed = ?');
+      params.push(completed === 'true' || completed === '1' ? 1 : 0);
+    }
+    if (title_like) {
+      conditions.push('title LIKE ?');
+      params.push(`%${title_like}%`);
+    }
+    if (conditions.length) query += ' WHERE ' + conditions.join(' AND ');
+    // Whitelist sortable columns to prevent SQL injection
+    const sortable = ['id', 'title', 'completed', 'user_id'];
+    const sortCol = sortable.includes(_sort) ? _sort : 'id';
+    const sortDir = String(_order).toLowerCase() === 'desc' ? 'DESC' : 'ASC';
+    query += ` ORDER BY ${sortCol} ${sortDir}`;
+    if (_limit) {
+      const limit = Math.max(1, parseInt(_limit, 10) || 10);
+      const page = Math.max(1, parseInt(_page, 10) || 1);
+      query += ' LIMIT ? OFFSET ?';
+      params.push(limit, (page - 1) * limit);
+    }
     const [rows] = await pool.query(query, params);
     res.json(rows);
   } catch (err) {

@@ -69,6 +69,10 @@ router.post('/login', async (req, res) => {
 
     const user = users[0];
 
+    if (user.blocked) {
+      return res.status(403).json({ message: 'Your account has been blocked. Contact the administrator.' });
+    }
+
     const [passwords] = await pool.query('SELECT password_hash FROM passwords WHERE user_id = ?', [user.id]);
     if (passwords.length === 0) {
       return res.status(401).json({ message: 'Invalid username or password' });
@@ -76,7 +80,25 @@ router.post('/login', async (req, res) => {
 
     const match = await bcrypt.compare(password, passwords[0].password_hash);
     if (!match) {
-      return res.status(401).json({ message: 'Invalid username or password' });
+      // Count consecutive failed attempts; block after 3 (admins are exempt to avoid lockout)
+      const attempts = user.failed_attempts + 1;
+      if (attempts >= 3 && user.role !== 'admin') {
+        await pool.query('UPDATE users SET failed_attempts = ?, blocked = TRUE WHERE id = ?', [attempts, user.id]);
+        return res.status(403).json({ message: 'Too many failed login attempts. Your account has been blocked. Contact the administrator.' });
+      }
+      await pool.query('UPDATE users SET failed_attempts = ? WHERE id = ?', [attempts, user.id]);
+      const remaining = user.role === 'admin' ? null : 3 - attempts;
+      return res.status(401).json({
+        message: remaining !== null
+          ? `Invalid username or password (${remaining} attempt${remaining === 1 ? '' : 's'} left before your account is blocked)`
+          : 'Invalid username or password'
+      });
+    }
+
+    // Successful login resets the failed attempts counter
+    if (user.failed_attempts > 0) {
+      await pool.query('UPDATE users SET failed_attempts = 0 WHERE id = ?', [user.id]);
+      user.failed_attempts = 0;
     }
 
     res.json(user);
