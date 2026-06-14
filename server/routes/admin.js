@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcrypt');
 const pool = require('../db');
+const { clearCache, cacheSize, cacheSnapshot, invalidateByPrefixes } = require('../cache');
 
 // Middleware: verify the requester is an admin.
 // Admin credentials are sent with each request (admin_id + admin_password)
@@ -29,6 +30,19 @@ async function requireAdmin(req, res, next) {
 }
 
 router.use(requireAdmin);
+
+// Manually clear all cache (useful after major/bulk updates)
+router.post('/cache/clear', (req, res) => {
+  const before = cacheSize();
+  clearCache();
+  res.json({ message: 'Cache cleared', entries_removed: before });
+});
+
+// Inspect cache state (count + keys + remaining TTL)
+router.post('/cache/stats', (req, res) => {
+  const snapshot = cacheSnapshot();
+  res.json(snapshot);
+});
 
 // List all users with role/blocked status and activity counts
 router.post('/users', async (req, res) => {
@@ -76,6 +90,7 @@ router.delete('/users/:id', async (req, res) => {
       return res.status(403).json({ message: 'Cannot delete an admin account' });
     }
     await pool.query('DELETE FROM users WHERE id = ?', [req.params.id]);
+    invalidateByPrefixes(['/api/users', '/api/admin/users', '/api/todos', '/api/posts', '/api/comments', '/api/albums', '/api/photos']);
     res.json({ message: 'User deleted' });
   } catch (err) {
     res.status(500).json({ error: err.message });

@@ -1,9 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
+const { getCached, setCached, invalidateByPrefixes } = require('../cache');
 
 // Get comments (filters: ?post_id=, ?user_id=, ?body_like=)
 router.get('/', async (req, res) => {
+  const cacheKey = req.originalUrl;
+  const cached = getCached(cacheKey);
+  if (cached) return res.set('X-Cache', 'HIT').json(cached);
   const { post_id, user_id, body_like } = req.query;
   try {
     let query = 'SELECT * FROM comments';
@@ -24,7 +28,8 @@ router.get('/', async (req, res) => {
     if (conditions.length) query += ' WHERE ' + conditions.join(' AND ');
     query += ' ORDER BY id ASC';
     const [rows] = await pool.query(query, params);
-    res.json(rows);
+    setCached(cacheKey, rows);
+    res.set('X-Cache', 'MISS').json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -32,10 +37,14 @@ router.get('/', async (req, res) => {
 
 // Get comment by ID
 router.get('/:id', async (req, res) => {
+  const cacheKey = req.originalUrl;
+  const cached = getCached(cacheKey);
+  if (cached) return res.set('X-Cache', 'HIT').json(cached);
   try {
     const [rows] = await pool.query('SELECT * FROM comments WHERE id = ?', [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ message: 'Comment not found' });
-    res.json(rows[0]);
+    setCached(cacheKey, rows[0]);
+    res.set('X-Cache', 'MISS').json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -52,6 +61,7 @@ router.post('/', async (req, res) => {
       'INSERT INTO comments (post_id, user_id, name, email, body) VALUES (?, ?, ?, ?, ?)',
       [post_id, user_id || null, name, email, body]
     );
+    invalidateByPrefixes(['/api/comments', '/api/posts']);
     res.status(201).json({ id: result.insertId, post_id, user_id: user_id || null, name, email, body });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -75,6 +85,8 @@ router.put('/:id', async (req, res) => {
       [name, email, body, req.params.id]
     );
     const [updated] = await pool.query('SELECT * FROM comments WHERE id = ?', [req.params.id]);
+    // Minor update policy: keep list caches on PUT; they refresh via TTL.
+    setCached(req.originalUrl, updated[0]);
     res.json(updated[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -94,6 +106,7 @@ router.delete('/:id', async (req, res) => {
       return res.status(403).json({ message: 'You can only delete your own comments' });
     }
     await pool.query('DELETE FROM comments WHERE id = ?', [req.params.id]);
+    invalidateByPrefixes(['/api/comments', '/api/posts']);
     res.json({ message: 'Comment deleted successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });

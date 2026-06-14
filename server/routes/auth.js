@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcrypt');
 const pool = require('../db');
+const { invalidateByPrefixes } = require('../cache');
 
 // Register
 router.post('/register', async (req, res) => {
@@ -39,6 +40,7 @@ router.post('/register', async (req, res) => {
       
       // Return user without password
       const [user] = await connection.query('SELECT * FROM users WHERE id = ?', [userId]);
+      invalidateByPrefixes(['/api/users', '/api/admin/users']);
       res.status(201).json(user[0]);
 
     } catch (err) {
@@ -84,6 +86,7 @@ router.post('/login', async (req, res) => {
       const attempts = user.failed_attempts + 1;
       if (attempts >= 3 && user.role !== 'admin') {
         await pool.query('UPDATE users SET failed_attempts = ?, blocked = TRUE WHERE id = ?', [attempts, user.id]);
+        invalidateByPrefixes(['/api/users', '/api/admin/users']);
         return res.status(403).json({ message: 'Too many failed login attempts. Your account has been blocked. Contact the administrator.' });
       }
       await pool.query('UPDATE users SET failed_attempts = ? WHERE id = ?', [attempts, user.id]);

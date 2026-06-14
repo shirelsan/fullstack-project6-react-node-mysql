@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
+const { getCached, setCached, invalidateByPrefixes } = require('../cache');
 
 // Helper: get the owner (user_id) of the album a photo belongs to
 async function getPhotoWithOwner(photoId) {
@@ -13,6 +14,9 @@ async function getPhotoWithOwner(photoId) {
 
 // Get photos (filters: ?album_id=, ?title_like=, pagination: ?_limit=, ?_page=)
 router.get('/', async (req, res) => {
+  const cacheKey = req.originalUrl;
+  const cached = getCached(cacheKey);
+  if (cached) return res.set('X-Cache', 'HIT').json(cached);
   const { album_id, title_like, _limit, _page } = req.query;
   try {
     let query = 'SELECT * FROM photos';
@@ -35,7 +39,8 @@ router.get('/', async (req, res) => {
       params.push(limit, (page - 1) * limit);
     }
     const [rows] = await pool.query(query, params);
-    res.json(rows);
+    setCached(cacheKey, rows);
+    res.set('X-Cache', 'MISS').json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -43,10 +48,14 @@ router.get('/', async (req, res) => {
 
 // Get photo by ID
 router.get('/:id', async (req, res) => {
+  const cacheKey = req.originalUrl;
+  const cached = getCached(cacheKey);
+  if (cached) return res.set('X-Cache', 'HIT').json(cached);
   try {
     const [rows] = await pool.query('SELECT * FROM photos WHERE id = ?', [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ message: 'Photo not found' });
-    res.json(rows[0]);
+    setCached(cacheKey, rows[0]);
+    res.set('X-Cache', 'MISS').json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -68,6 +77,7 @@ router.post('/', async (req, res) => {
       'INSERT INTO photos (album_id, title, url, thumbnail_url) VALUES (?, ?, ?, ?)',
       [album_id, title, url, thumbnail_url || url]
     );
+    invalidateByPrefixes(['/api/photos', '/api/albums']);
     res.status(201).json({ id: result.insertId, album_id, title, url, thumbnail_url: thumbnail_url || url });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -91,6 +101,8 @@ router.put('/:id', async (req, res) => {
       [title, url, thumbnail_url, req.params.id]
     );
     const [updated] = await pool.query('SELECT * FROM photos WHERE id = ?', [req.params.id]);
+    // Minor update policy: keep list caches on PUT; they refresh via TTL.
+    setCached(req.originalUrl, updated[0]);
     res.json(updated[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -110,6 +122,7 @@ router.delete('/:id', async (req, res) => {
       return res.status(403).json({ message: 'You can only delete photos in your own albums' });
     }
     await pool.query('DELETE FROM photos WHERE id = ?', [req.params.id]);
+    invalidateByPrefixes(['/api/photos', '/api/albums']);
     res.json({ message: 'Photo deleted successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });

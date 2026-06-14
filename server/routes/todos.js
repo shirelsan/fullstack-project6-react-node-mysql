@@ -1,9 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
+const { getCached, setCached, invalidateByPrefixes } = require('../cache');
 
 // Get todos (filters: ?user_id=, ?completed=, ?title_like=, sort: ?_sort=&_order=, pagination: ?_limit=&_page=)
 router.get('/', async (req, res) => {
+  const cacheKey = req.originalUrl;
+  const cached = getCached(cacheKey);
+  if (cached) return res.set('X-Cache', 'HIT').json(cached);
   const { user_id, completed, title_like, _sort, _order, _limit, _page } = req.query;
   try {
     let query = 'SELECT * FROM todos';
@@ -34,7 +38,8 @@ router.get('/', async (req, res) => {
       params.push(limit, (page - 1) * limit);
     }
     const [rows] = await pool.query(query, params);
-    res.json(rows);
+    setCached(cacheKey, rows);
+    res.set('X-Cache', 'MISS').json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -42,10 +47,14 @@ router.get('/', async (req, res) => {
 
 // Get todo by ID
 router.get('/:id', async (req, res) => {
+  const cacheKey = req.originalUrl;
+  const cached = getCached(cacheKey);
+  if (cached) return res.set('X-Cache', 'HIT').json(cached);
   try {
     const [rows] = await pool.query('SELECT * FROM todos WHERE id = ?', [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ message: 'Todo not found' });
-    res.json(rows[0]);
+    setCached(cacheKey, rows[0]);
+    res.set('X-Cache', 'MISS').json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -62,6 +71,7 @@ router.post('/', async (req, res) => {
       'INSERT INTO todos (user_id, title, completed) VALUES (?, ?, ?)',
       [user_id, title, completed || false]
     );
+    invalidateByPrefixes(['/api/todos']);
     res.status(201).json({ id: result.insertId, user_id, title, completed: completed || false });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -77,6 +87,9 @@ router.put('/:id', async (req, res) => {
       [title, completed, req.params.id]
     );
     const [rows] = await pool.query('SELECT * FROM todos WHERE id = ?', [req.params.id]);
+    // Minor update policy: do not invalidate list cache on PUT.
+    // Stale lists refresh naturally by TTL.
+    setCached(req.originalUrl, rows[0]);
     res.json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -87,6 +100,7 @@ router.put('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     await pool.query('DELETE FROM todos WHERE id = ?', [req.params.id]);
+    invalidateByPrefixes(['/api/todos']);
     res.json({ message: 'Todo deleted successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });

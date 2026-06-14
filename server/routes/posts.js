@@ -1,9 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
+const { getCached, setCached, invalidateByPrefixes } = require('../cache');
 
 // Get posts (filters: ?user_id=, ?title_like=, ?q= searches title+body, sort: ?_sort=&_order=, pagination: ?_limit=&_page=)
 router.get('/', async (req, res) => {
+  const cacheKey = req.originalUrl;
+  const cached = getCached(cacheKey);
+  if (cached) return res.set('X-Cache', 'HIT').json(cached);
   const { user_id, title_like, q, _sort, _order, _limit, _page } = req.query;
   try {
     let query = 'SELECT * FROM posts';
@@ -34,7 +38,8 @@ router.get('/', async (req, res) => {
       params.push(limit, (page - 1) * limit);
     }
     const [rows] = await pool.query(query, params);
-    res.json(rows);
+    setCached(cacheKey, rows);
+    res.set('X-Cache', 'MISS').json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -42,9 +47,13 @@ router.get('/', async (req, res) => {
 
 // Get comments of a post (jsonplaceholder style: /posts/:id/comments)
 router.get('/:id/comments', async (req, res) => {
+  const cacheKey = req.originalUrl;
+  const cached = getCached(cacheKey);
+  if (cached) return res.set('X-Cache', 'HIT').json(cached);
   try {
     const [rows] = await pool.query('SELECT * FROM comments WHERE post_id = ? ORDER BY id ASC', [req.params.id]);
-    res.json(rows);
+    setCached(cacheKey, rows);
+    res.set('X-Cache', 'MISS').json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -52,10 +61,14 @@ router.get('/:id/comments', async (req, res) => {
 
 // Get post by ID
 router.get('/:id', async (req, res) => {
+  const cacheKey = req.originalUrl;
+  const cached = getCached(cacheKey);
+  if (cached) return res.set('X-Cache', 'HIT').json(cached);
   try {
     const [rows] = await pool.query('SELECT * FROM posts WHERE id = ?', [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ message: 'Post not found' });
-    res.json(rows[0]);
+    setCached(cacheKey, rows[0]);
+    res.set('X-Cache', 'MISS').json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -72,6 +85,7 @@ router.post('/', async (req, res) => {
       'INSERT INTO posts (user_id, title, body) VALUES (?, ?, ?)',
       [user_id, title, body]
     );
+    invalidateByPrefixes(['/api/posts', '/api/comments']);
     res.status(201).json({ id: result.insertId, user_id, title, body });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -95,6 +109,8 @@ router.put('/:id', async (req, res) => {
       [title, body, req.params.id]
     );
     const [updated] = await pool.query('SELECT * FROM posts WHERE id = ?', [req.params.id]);
+    // Minor update policy: keep list caches on PUT; they refresh via TTL.
+    setCached(req.originalUrl, updated[0]);
     res.json(updated[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -114,6 +130,7 @@ router.delete('/:id', async (req, res) => {
       return res.status(403).json({ message: 'You can only delete your own posts' });
     }
     await pool.query('DELETE FROM posts WHERE id = ?', [req.params.id]);
+    invalidateByPrefixes(['/api/posts', '/api/comments']);
     res.json({ message: 'Post deleted successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });

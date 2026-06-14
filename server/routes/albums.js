@@ -1,9 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
+const { getCached, setCached, invalidateByPrefixes } = require('../cache');
 
 // Get albums (filters: ?user_id=, ?title_like=)
 router.get('/', async (req, res) => {
+  const cacheKey = req.originalUrl;
+  const cached = getCached(cacheKey);
+  if (cached) return res.set('X-Cache', 'HIT').json(cached);
   const { user_id, title_like } = req.query;
   try {
     let query = 'SELECT * FROM albums';
@@ -20,7 +24,8 @@ router.get('/', async (req, res) => {
     if (conditions.length) query += ' WHERE ' + conditions.join(' AND ');
     query += ' ORDER BY id ASC';
     const [rows] = await pool.query(query, params);
-    res.json(rows);
+    setCached(cacheKey, rows);
+    res.set('X-Cache', 'MISS').json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -28,10 +33,14 @@ router.get('/', async (req, res) => {
 
 // Get album by ID
 router.get('/:id', async (req, res) => {
+  const cacheKey = req.originalUrl;
+  const cached = getCached(cacheKey);
+  if (cached) return res.set('X-Cache', 'HIT').json(cached);
   try {
     const [rows] = await pool.query('SELECT * FROM albums WHERE id = ?', [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ message: 'Album not found' });
-    res.json(rows[0]);
+    setCached(cacheKey, rows[0]);
+    res.set('X-Cache', 'MISS').json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -39,9 +48,13 @@ router.get('/:id', async (req, res) => {
 
 // Get photos of an album (jsonplaceholder style: /albums/:id/photos)
 router.get('/:id/photos', async (req, res) => {
+  const cacheKey = req.originalUrl;
+  const cached = getCached(cacheKey);
+  if (cached) return res.set('X-Cache', 'HIT').json(cached);
   try {
     const [rows] = await pool.query('SELECT * FROM photos WHERE album_id = ? ORDER BY id ASC', [req.params.id]);
-    res.json(rows);
+    setCached(cacheKey, rows);
+    res.set('X-Cache', 'MISS').json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -58,6 +71,7 @@ router.post('/', async (req, res) => {
       'INSERT INTO albums (user_id, title) VALUES (?, ?)',
       [user_id, title]
     );
+    invalidateByPrefixes(['/api/albums', '/api/photos']);
     res.status(201).json({ id: result.insertId, user_id, title });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -78,6 +92,8 @@ router.put('/:id', async (req, res) => {
     }
     await pool.query('UPDATE albums SET title = COALESCE(?, title) WHERE id = ?', [title, req.params.id]);
     const [updated] = await pool.query('SELECT * FROM albums WHERE id = ?', [req.params.id]);
+    // Minor update policy: keep list caches on PUT; they refresh via TTL.
+    setCached(req.originalUrl, updated[0]);
     res.json(updated[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -97,6 +113,7 @@ router.delete('/:id', async (req, res) => {
       return res.status(403).json({ message: 'You can only delete your own albums' });
     }
     await pool.query('DELETE FROM albums WHERE id = ?', [req.params.id]);
+    invalidateByPrefixes(['/api/albums', '/api/photos']);
     res.json({ message: 'Album deleted successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
